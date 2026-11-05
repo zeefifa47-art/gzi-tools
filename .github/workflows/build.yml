@@ -20,19 +20,15 @@ jobs:
         run: |
           mkdir -p proj
           unzip -q -o gzi-tools.zip -d proj
-          ls -la proj
-      - name: Build APK split
+      - name: Build APK
         working-directory: proj
         run: gradle :app:assembleRelease --no-daemon --stacktrace
-      - name: Kumpulkan APK
+      - name: Siapkan APK
         run: |
           mkdir -p out
-          for f in proj/app/build/outputs/apk/release/*.apk; do
-            n=$(basename "$f" | sed 's/^app-//; s/-release//')
-            cp "$f" "out/gzi-tools-$n"
-          done
+          cp proj/app/build/outputs/apk/release/app-release.apk out/gzi-tools.apk
           ls -la out
       - uses: actions/upload-artifact@v4
         with:
-          name: gzi-tools-split
-          path: out/*.apk
+          name: gzi-tools
+          path: out/gzi-tools.apk
