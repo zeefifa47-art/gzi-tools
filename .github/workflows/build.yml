@@ -1,6 +1,7 @@
-name: Build APK
+name: Build GZI TOOLS
 on:
   push:
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
@@ -12,26 +13,20 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-      - uses: gradle/actions/setup-gradle@v3
+      - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: 8.9
-      - name: Unzip
+          gradle-version: "8.9"
+      - name: Build APK split
+        run: gradle :app:assembleRelease --no-daemon --stacktrace
+      - name: Kumpulkan APK
         run: |
-          mkdir proj
-          unzip -q gzi-tools.zip -d proj
-      - name: Build
-        shell: bash
-        working-directory: proj
-        run: gradle assembleDebug --no-daemon --console=plain 2>&1 | tee ../build.log
-      - name: Ringkasan error
-        if: failure()
-        run: |
-          echo '### Error build' >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          grep -E '^e: |error:|What went wrong' -A3 build.log | head -80 >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          mkdir -p out
+          for f in app/build/outputs/apk/release/*.apk; do
+            n=$(basename "$f" | sed 's/^app-//; s/-release//')
+            cp "$f" "out/gzi-tools-$n"
+          done
+          ls -la out
       - uses: actions/upload-artifact@v4
-        if: success()
         with:
-          name: gzi-tools-debug
-          path: proj/app/build/outputs/apk/debug/app-debug.apk
+          name: gzi-tools-split
+          path: out/*.apk
