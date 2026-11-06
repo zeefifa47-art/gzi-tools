@@ -16,19 +16,70 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
+
       - name: Ekstrak zip
         run: |
           mkdir -p proj
           unzip -q -o gzi-tools.zip -d proj
-      - name: Build APK
+
+      - name: Kompilasi komponen native (arm64)
+        run: |
+          NDK="${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-${ANDROID_NDK_LATEST_HOME:-}}}"
+          if [ -z "$NDK" ]; then NDK="$ANDROID_SDK_ROOT/ndk/$(ls "$ANDROID_SDK_ROOT/ndk" | sort -V | tail -1)"; fi
+          CC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang"
+          mkdir -p proj/app/src/main/assets
+          "$CC" -O2 -Wall -o proj/app/src/main/assets/gzitouchd proj/native/gzitouchd.c
+          ls -la proj/app/src/main/assets
+
+      - name: Build APK dan AAB
         working-directory: proj
-        run: gradle :app:assembleRelease --no-daemon --stacktrace
-      - name: Siapkan APK
+        run: gradle :app:assembleRelease :app:bundleRelease --no-daemon --stacktrace
+
+      - name: Siapkan hasil
         run: |
           mkdir -p out
           cp proj/app/build/outputs/apk/release/app-release.apk out/gzi-tools.apk
+          curl -sL -o bt.jar https://github.com/google/bundletool/releases/download/1.15.6/bundletool-all-1.15.6.jar
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            mkdir -p "$HOME/.android"
+            keytool -genkey -v -keystore "$HOME/.android/debug.keystore" -storepass android \
+              -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+          java -jar bt.jar build-apks \
+            --bundle=proj/app/build/outputs/bundle/release/app-release.aab \
+            --output=out/gzi-tools.apks --mode=default \
+            --ks="$HOME/.android/debug.keystore" --ks-pass=pass:android \
+            --ks-key-alias=androiddebugkey --key-pass=pass:android
+          rm -rf x && mkdir x && unzip -q out/gzi-tools.apks -d x
+          python3 - <<'PY'
+          import glob, json, os, zipfile
+          files = sorted(glob.glob('x/splits/*.apk'))
+          def sid(f):
+              n = os.path.basename(f)[:-4]
+              return 'base' if n == 'base-master' else 'config.' + n.replace('base-', '')
+          m = {
+            "xapk_version": 2,
+            "package_name": "com.gzitools",
+            "name": "GZI TOOLS",
+            "version_code": "3",
+            "version_name": "2.0.0",
+            "min_sdk_version": "26",
+            "target_sdk_version": "34",
+            "permissions": [],
+            "split_apks": [{"file": os.path.basename(f), "id": sid(f)} for f in files],
+          }
+          with zipfile.ZipFile('out/gzi-tools.xapk', 'w', zipfile.ZIP_DEFLATED) as z:
+              z.writestr('manifest.json', json.dumps(m))
+              for f in files:
+                  z.write(f, os.path.basename(f))
+          PY
           ls -la out
+
       - uses: actions/upload-artifact@v4
         with:
           name: gzi-tools
-          path: out/gzi-tools.apk
+          path: |
+            out/gzi-tools.apk
+            out/gzi-tools.apks
+            out/gzi-tools.xapk
